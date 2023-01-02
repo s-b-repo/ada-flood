@@ -5,6 +5,7 @@ import tkinter as tk
 import stem
 import stem.connection
 import stem.process
+import time
 
 class App:
     def __init__(self):
@@ -16,12 +17,19 @@ class App:
         # Set up the GUI
         self.window = tk.Tk()
         self.window.title('DNS Scanner')
-        tk.Label(self.window, text='Site:').grid(row=0, column=0)
-        self.site_entry = tk.Entry(self.window)
-        self.site_entry.grid(row=0, column=1)
-        tk.Button(self.window, text='Scan', command=self.scan).grid(row=1, column=0, columnspan=2)
-        self.results_text = tk.Text(self.window)
-        self.results_text.grid(row=2, column=0, columnspan=2)
+        self.window.configure(bg='#f0f0f0')
+        self.window.geometry('600x400')
+        self.window.resizable(False, False)
+
+        tk.Label(self.window, text='Site:', font=('Arial', 12), bg='#f0f0f0').grid(row=0, column=0, padx=10, pady=10)
+        self.site_entry = tk.Entry(self.window, font=('Arial', 12), bg='#ffffff')
+        self.site_entry.grid(row=0, column=1, padx=10, pady=10)
+        tk.Button(self.window, text='Scan', font=('Arial', 12), bg='#add8e6', command=self.scan).grid(row=1, column=0, columnspan=2, padx=10, pady=10)
+        self.results_text = tk.Text(self.window, font=('Arial', 12), bg='#ffffff')
+        self.results_text.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
+
+        # Set the stop time to 1 hour from now
+        self.stop_time = time.time() + 3600
 
     def scan(self):
         site = self.site_entry.get()
@@ -33,6 +41,9 @@ class App:
         resolver.port = 9050  # Use the SOCKS port that the TOR process is listening on
 
         # Use the resolver to look up the NS records for the root zone
+        response = res
+
+                # Use the resolver to look up the NS records for the root zone
         response = resolver.query('.', 'NS')
 
         # Extract the names of the DNS servers from the response
@@ -58,7 +69,13 @@ class App:
             except dns.resolver.NXDOMAIN:
                 self.results_text.insert(tk.END, f'{site} does not exist\n')
             except dns.resolver.NoNameservers:
-                self.results_text.insert(tk.END, f'Unable to connect to {server}\n')
+
+                 self.results_text.insert(tk.END, f'Unable to connect to {server}\n')
+
+        # Check if the stop time has been reached
+        if time.time() > self.stop_time:
+            # Stop the scan
+            return
 
         # Loop the scan every 5 seconds
         self.window.after(5000, self.scan)
