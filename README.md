@@ -1,5 +1,6 @@
 # ada-flood
-a advanced ddosing tool that uses tor and it scans for every dns  then it will ping a site with gui with to
+a advanced ddosing tool that uses tor to scan for every dns it can find withing time limit has import and export functions to save as 
+a list of dns server it uses tor to ask the dns to ping a site or ip after 1 or 2 minute delay should have gui with too
 
 #i am not responsible for your actions or liabile for you action nor do i take responsiblity  use at your own risk
 
