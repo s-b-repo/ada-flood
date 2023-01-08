@@ -8,6 +8,6 @@ ada stand for advanced ddos amplified attack dns denial
 
 the main version is main_4.py 
 
-bash to script to install ./"script name here"
+bash to script to install ./"install requirements.sh "
 
 run python main.py
