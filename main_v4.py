@@ -1,17 +1,19 @@
 import dns.resolver
 import dns.query
 import dns.zone
+import threading
 import random
 import string
 import tkinter as tk
 import tkinter.filedialog
-import tkinter.messagebox
 import stem
-import stem.connection
+import stem.control
 import stem.process
 import socks
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
+from scapy.all import IP, UDP, DNS, DNSQR, send
 
 class App:
     def __init__(self):
@@ -46,91 +48,96 @@ class App:
         self.time_slider = tk.Scale(self.window, from_=1, to=24, orient=tk.HORIZONTAL, font=('Arial', 12), bg='#f0f0f0')
         self.time_slider.grid(row=5, column=0, columnspan=2, padx=10, pady=10)
 
-# Set up an empty list of servers
+        # Set up an empty list of servers and proxies
         self.servers = []
+        self.proxies = []  # Add a proxy list here
+        self.stop_time = None
 
     def generate_random_server(self):
         """Generate a random server name."""
         return ''.join(random.choices(string.ascii_lowercase + string.digits, k=10)) + '.com'
 
     def scan(self):
-        """Scan for DNS servers using the TOR network."""
+        """Scan for DNS servers using the TOR network or proxies."""
         site = self.site_entry.get()
         self.results_text.delete('1.0', tk.END)
+        self.servers = []  # Reset server list
 
-        # Use the TOR proxy as a SOCKS proxy for DNS requests
-        resolver = dns.resolver.Resolver()
-        resolver.socks_proxy = 'socks5h://127.0.0.1:9050'
-
-        # Generate a random server name
-        server = self.generate_random_server()
-
-        # Look up the NS records for the server
-        response = resolver.query(server, 'NS')
-
-        # Extract the names of the DNS servers from the response
-        servers = [rdata.target for rdata in response]
-
-        # Use a DNS zone transfer to retrieve the list of DNS servers for each server
-        for server in servers:
-            try:
-                zone = dns.zone.from_xfr(dns.query.xfr(server, '.'))
-                names = list(zone.nodes.keys())
-                self.results_text.insert(tk.END, f'{server}: {names}\n')
-                self.servers += names  # Add the names of the servers to the list
-            except dns.exception.FormError:
-                self.results_text.insert(tk.END, f'{server}: zone transfer failed\n')
+        # Start the scan
+        self.recursive_dns_scan('com.')
 
         # Save the list of DNS servers to a file
-        with open('dns_servers.txt', 'w') as file:
-            for server in self.servers:
-                file.write(server + '\n')
+        self.export_list()
 
-        # Ping the site using all the DNS servers
-        self.ping_site(site)
+        # Concurrently query all DNS servers for the site information
+        self.concurrent_info_gathering(site)
 
     def import_list(self):
-        """Import a list of DNS servers from a file."""
+        """Import a list of DNS servers or proxies from a file."""
         filepath = tk.filedialog.askopenfilename()
         if filepath:
             with open(filepath, 'r') as file:
                 self.servers = [line.strip() for line in file]
+                # You can also import proxies here if needed
 
     def export_list(self):
         """Export the list of DNS servers to a file."""
-        filepath = tk.filedialog.asksaveasfilename()
+        filepath = tk.filedialog.asksaveasfilename(defaultextension=".txt")
         if filepath:
             with open(filepath, 'w') as file:
                 for server in self.servers:
                     file.write(server + '\n')
 
-        def ping_site(self, site):
-        #Ping the site using all the DNS servers in the list.
-            self.results_text.insert(tk.END, f'Pinging {site} using all DNS servers in the list...\n')
-        for server in self.servers:
-            # Use the TOR proxy as a SOCKS proxy for the ping request
-            socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, '127.0.0.1', 9050)
-            socks.socket = socks.socksocket
+    def recursive_dns_scan(self, domain):
+        """Recursively scan DNS servers starting from the root."""
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = ['127.0.0.1']  # Use local Tor proxy
 
-            # Use the subprocess module to run the ping command
-            result = subprocess.run(['ping', '-c', '1', '-W', '2', ping_site], stdout=subprocess.PIPE)
+        try:
+            response = resolver.resolve(domain, 'NS')
+            servers = [rdata.target.to_text() for rdata in response]
 
-            # Check the output of the ping command
-            if '0% packet loss' in result.stdout.decode():
-                self.results_text.insert(tk.END, f'{server}: success\n')
-            else:
-                self.results_text.insert(tk.END, f'{server}: fail\n')
+            for server in servers:
+                self.results_text.insert(tk.END, f'{domain}: {server}\n')
+                self.servers.append(server)  # Add to the list
+
+                # Recursively scan the lower-level domain
+                sub_domain = self.generate_random_server()
+                self.recursive_dns_scan(sub_domain)
+
+        except dns.exception.DNSException as e:
+            self.results_text.insert(tk.END, f'Failed to query {domain}: {e}\n')
+
+    def concurrent_info_gathering(self, site):
+        """Concurrently gather information from all DNS servers."""
+        self.results_text.insert(tk.END, f'Gathering info from {site} using all DNS servers in the list...\n')
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = [executor.submit(self.ping_site, site, server, proxy) for server, proxy in zip(self.servers, self.proxies)]
+            for future in futures:
+                result = future.result()
+                self.results_text.insert(tk.END, result)
+
+    def ping_site(self, site, server, proxy):
+        """Ping the site using a specific DNS server and proxy."""
+        socks.setdefaultproxy(socks.PROXY_TYPE_SOCKS5, proxy[0], int(proxy[1]))
+        socks.socket = socks.socksocket
+
+        try:
+            # Send a ping through the proxy to the DNS server using scapy
+            packet = IP(dst=server) / UDP(sport=random.randint(1024, 65535)) / DNS(rd=1, qd=DNSQR(qname=site))
+            send(packet, verbose=0)  # Use scapy to send the packet
+            return f'{server} via {proxy}: Packet sent successfully\n'
+        except Exception as e:
+            return f'{server} via {proxy}: Failed to send packet - {e}\n'
 
     def start_random_scan(self):
-        """Start a random scan for DNS servers using the TOR network."""
-        # Set the stop time for the scan
+        """Start a random scan for DNS servers using the TOR network or proxies."""
         self.stop_time = time.time() + self.time_slider.get() * 3600
-
-        # Start the scan
         self.random_scan()
 
     def random_scan(self):
-        """Scan for random DNS servers using the TOR network."""
+        """Scan for random DNS servers using the TOR network or proxies."""
         if time.time() < self.stop_time:
             self.scan()
             self.remaining_time_label.configure(text=f'Remaining time: {int(self.stop_time - time.time()) // 3600} hours')
@@ -141,4 +148,3 @@ class App:
 if __name__ == '__main__':
     app = App()
     app.window.mainloop()
-    
